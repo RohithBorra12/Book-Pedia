@@ -1,0 +1,16 @@
+# Creates a small EKS (Kubernetes) cluster on AWS:
+#   eksctl create cluster -f aws/eksctl-cluster.yaml     (takes ~15-20 minutes)
+#   eksctl delete cluster -f aws/eksctl-cluster.yaml     (DELETE when done - it costs money every hour)
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: bookstore
+  region: ap-south-1        # change to your region
+
+managedNodeGroups:
+  - name: workers
+    instanceType: t3.large  # 2 vCPU, 8 GB - enough for everything in this project
+    desiredCapacity: 2
+    minSize: 1
+    maxSize: 3

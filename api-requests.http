@@ -1,0 +1,64 @@
+### Works with IntelliJ HTTP Client or VS Code "REST Client" extension.
+### 1) Login as admin and copy the token into @token below
+
+POST http://localhost:8081/api/auth/login
+Content-Type: application/json
+
+{ "username": "admin", "password": "admin123" }
+
+###
+@token = PASTE_TOKEN_HERE
+
+### Register a normal user
+POST http://localhost:8081/api/auth/register
+Content-Type: application/json
+
+{ "username": "ravi", "password": "secret123" }
+
+### Who am I?
+GET http://localhost:8081/api/users/me
+Authorization: Bearer {{token}}
+
+### List users (ADMIN only)
+GET http://localhost:8081/api/users
+Authorization: Bearer {{token}}
+
+### List books (cached in Redis after first call)
+GET http://localhost:8082/api/books
+Authorization: Bearer {{token}}
+
+### Books grouped by author (Streams demo)
+GET http://localhost:8082/api/books/by-author
+Authorization: Bearer {{token}}
+
+### Add a book (ADMIN only)
+POST http://localhost:8082/api/books
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "title": "Kafka: The Definitive Guide", "author": "Gwen Shapira", "price": 700, "stock": 4 }
+
+### Place an order (replace BOOK_ID with an id from the book list)
+POST http://localhost:8083/api/orders
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "bookId": "BOOK_ID", "quantity": 1 }
+
+### My orders
+GET http://localhost:8083/api/orders/my
+Authorization: Bearer {{token}}
+
+### My summary (Java 21 getFirst demo)
+GET http://localhost:8083/api/orders/my/summary
+Authorization: Bearer {{token}}
+
+### All orders (ADMIN only)
+GET http://localhost:8083/api/orders
+Authorization: Bearer {{token}}
+
+### Circuit breaker state
+GET http://localhost:8083/actuator/circuitbreakers
+
+### Prometheus metrics
+GET http://localhost:8083/actuator/prometheus

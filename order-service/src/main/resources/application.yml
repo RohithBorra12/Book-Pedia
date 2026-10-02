@@ -1,0 +1,58 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: order-service
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:3306/orderdb?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true}
+    username: ${DB_USER:root}
+    password: ${DB_PASSWORD:root}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+  kafka:
+    bootstrap-servers: ${KAFKA_SERVERS:localhost:9092}
+  threads:
+    virtual:
+      enabled: true
+
+book-service:
+  url: ${BOOK_SERVICE_URL:http://localhost:8082}
+
+jwt:
+  secret: ${JWT_SECRET:bookstore-demo-secret-key-change-me-0123456789}
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      bookService:
+        sliding-window-size: 5              # look at the last 5 calls
+        minimum-number-of-calls: 3
+        failure-rate-threshold: 50          # 50% failed -> OPEN
+        wait-duration-in-open-state: 10s    # stay OPEN for 10s, then HALF_OPEN
+        permitted-number-of-calls-in-half-open-state: 2
+        register-health-indicator: true
+        ignore-exceptions:                  # 404 etc. are not outages
+          - org.springframework.web.client.HttpClientErrorException
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics,circuitbreakers
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true
+  health:
+    circuitbreakers:
+      enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+logstash:
+  host: ${LOGSTASH_HOST:localhost:5000}

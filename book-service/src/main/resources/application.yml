@@ -1,0 +1,43 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: book-service
+  data:
+    mongodb:
+      uri: ${MONGO_URI:mongodb://localhost:27017/bookdb}
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: 6379
+  cache:
+    type: redis
+    redis:
+      time-to-live: 10m        # cached book list expires after 10 minutes
+  kafka:
+    bootstrap-servers: ${KAFKA_SERVERS:localhost:9092}
+    consumer:
+      group-id: book-service
+      auto-offset-reset: earliest
+  threads:
+    virtual:
+      enabled: true
+
+jwt:
+  secret: ${JWT_SECRET:bookstore-demo-secret-key-change-me-0123456789}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+logstash:
+  host: ${LOGSTASH_HOST:localhost:5000}

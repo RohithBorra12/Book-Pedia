@@ -1,0 +1,148 @@
+# Starts EVERYTHING on your laptop with one command:
+#   docker compose up --build                     (apps + databases + Kafka + Prometheus + Grafana)
+#   docker compose --profile logging up --build   (also Elasticsearch + Logstash + Kibana, needs ~3 GB extra RAM)
+
+x-app-env: &app-env
+  JWT_SECRET: bookstore-demo-secret-key-change-me-0123456789
+  LOGSTASH_HOST: logstash:5000
+
+services:
+  # ---------------- Databases ----------------
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: userdb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      retries: 20
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: orderdb
+    ports: ["3306:3306"]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-proot"]
+      interval: 5s
+      retries: 30
+
+  mongo:
+    image: mongo:7
+    ports: ["27017:27017"]
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+
+  # ---------------- Kafka (KRaft mode, no Zookeeper) ----------------
+  kafka:
+    image: apache/kafka:3.8.0
+    ports: ["9092:9092"]
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://:29092,EXTERNAL://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+
+  # ---------------- Microservices ----------------
+  user-service:
+    build: ./user-service
+    ports: ["8081:8081"]
+    environment:
+      <<: *app-env
+      DB_URL: jdbc:postgresql://postgres:5432/userdb
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: on-failure
+
+  book-service:
+    build: ./book-service
+    ports: ["8082:8082"]
+    environment:
+      <<: *app-env
+      MONGO_URI: mongodb://mongo:27017/bookdb
+      REDIS_HOST: redis
+      KAFKA_SERVERS: kafka:29092
+    depends_on: [mongo, redis, kafka]
+    restart: on-failure
+
+  order-service:
+    build: ./order-service
+    ports: ["8083:8083"]
+    environment:
+      <<: *app-env
+      DB_URL: jdbc:mysql://mysql:3306/orderdb?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true
+      DB_USER: root
+      DB_PASSWORD: root
+      KAFKA_SERVERS: kafka:29092
+      BOOK_SERVICE_URL: http://book-service:8082
+    depends_on:
+      mysql: { condition: service_healthy }
+      kafka: { condition: service_started }
+    restart: on-failure
+
+  frontend:
+    build: ./frontend
+    ports: ["3000:80"]
+    depends_on: [user-service, book-service, order-service]
+
+  # ---------------- Monitoring: Prometheus + Grafana ----------------
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    ports: ["9090:9090"]
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    ports: ["3001:3000"]
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on: [prometheus]
+
+  # ---------------- Logging: ELK (optional profile) ----------------
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
+    profiles: [logging]
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    ports: ["9200:9200"]
+
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.15.0
+    profiles: [logging]
+    volumes:
+      - ./monitoring/logstash/logstash.conf:/usr/share/logstash/pipeline/logstash.conf:ro
+    environment:
+      LS_JAVA_OPTS: -Xms256m -Xmx256m
+      XPACK_MONITORING_ENABLED: "false"
+    ports: ["5000:5000"]
+    depends_on: [elasticsearch]
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.15.0
+    profiles: [logging]
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    ports: ["5601:5601"]
+    depends_on: [elasticsearch]

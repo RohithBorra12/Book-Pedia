@@ -1,0 +1,186 @@
+# The 3 microservices + frontend.
+# IMAGE_REGISTRY and IMAGE_TAG are replaced by deploy.sh (e.g. your ECR URL and the Jenkins build number).
+---
+apiVersion: v1
+kind: ConfigMap                    # non-secret settings
+metadata: { name: bookstore-config }
+data:
+  USER_DB_URL: jdbc:postgresql://postgres:5432/userdb
+  ORDER_DB_URL: jdbc:mysql://mysql:3306/orderdb?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true
+  MONGO_URI: mongodb://mongo:27017/bookdb
+  REDIS_HOST: redis
+  KAFKA_SERVERS: kafka:9092
+  BOOK_SERVICE_URL: http://book-service:8082
+---
+apiVersion: v1
+kind: Secret                       # passwords and keys (base64-stored by Kubernetes)
+metadata: { name: bookstore-secrets }
+type: Opaque
+stringData:
+  JWT_SECRET: change-this-in-every-environment-0123456789abcdef
+  POSTGRES_PASSWORD: postgres
+  MYSQL_PASSWORD: root
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: user-service }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: user-service } }
+  template:
+    metadata: { labels: { app: user-service } }
+    spec:
+      containers:
+        - name: user-service
+          image: IMAGE_REGISTRY/bookstore-user-service:IMAGE_TAG
+          imagePullPolicy: IfNotPresent
+          ports: [{ containerPort: 8081 }]
+          env:
+            - name: DB_URL
+              valueFrom: { configMapKeyRef: { name: bookstore-config, key: USER_DB_URL } }
+            - { name: DB_USER, value: postgres }
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: bookstore-secrets, key: POSTGRES_PASSWORD } }
+            - name: JWT_SECRET
+              valueFrom: { secretKeyRef: { name: bookstore-secrets, key: JWT_SECRET } }
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: 8081 }
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: 8081 }
+            initialDelaySeconds: 60
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 100m, memory: 384Mi }
+            limits: { memory: 640Mi }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: user-service }
+spec:
+  selector: { app: user-service }
+  ports: [{ port: 8081 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: book-service }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: book-service } }
+  template:
+    metadata: { labels: { app: book-service } }
+    spec:
+      containers:
+        - name: book-service
+          image: IMAGE_REGISTRY/bookstore-book-service:IMAGE_TAG
+          imagePullPolicy: IfNotPresent
+          ports: [{ containerPort: 8082 }]
+          env:
+            - name: MONGO_URI
+              valueFrom: { configMapKeyRef: { name: bookstore-config, key: MONGO_URI } }
+            - name: REDIS_HOST
+              valueFrom: { configMapKeyRef: { name: bookstore-config, key: REDIS_HOST } }
+            - name: KAFKA_SERVERS
+              valueFrom: { configMapKeyRef: { name: bookstore-config, key: KAFKA_SERVERS } }
+            - name: JWT_SECRET
+              valueFrom: { secretKeyRef: { name: bookstore-secrets, key: JWT_SECRET } }
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: 8082 }
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: 8082 }
+            initialDelaySeconds: 60
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 100m, memory: 384Mi }
+            limits: { memory: 640Mi }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: book-service }
+spec:
+  selector: { app: book-service }
+  ports: [{ port: 8082 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: order-service }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: order-service } }
+  template:
+    metadata: { labels: { app: order-service } }
+    spec:
+      containers:
+        - name: order-service
+          image: IMAGE_REGISTRY/bookstore-order-service:IMAGE_TAG
+          imagePullPolicy: IfNotPresent
+          ports: [{ containerPort: 8083 }]
+          env:
+            - name: DB_URL
+              valueFrom: { configMapKeyRef: { name: bookstore-config, key: ORDER_DB_URL } }
+            - { name: DB_USER, value: root }
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: bookstore-secrets, key: MYSQL_PASSWORD } }
+            - name: KAFKA_SERVERS
+              valueFrom: { configMapKeyRef: { name: bookstore-config, key: KAFKA_SERVERS } }
+            - name: BOOK_SERVICE_URL
+              valueFrom: { configMapKeyRef: { name: bookstore-config, key: BOOK_SERVICE_URL } }
+            - name: JWT_SECRET
+              valueFrom: { secretKeyRef: { name: bookstore-secrets, key: JWT_SECRET } }
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: 8083 }
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: 8083 }
+            initialDelaySeconds: 60
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 100m, memory: 384Mi }
+            limits: { memory: 640Mi }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: order-service }
+spec:
+  selector: { app: order-service }
+  ports: [{ port: 8083 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: frontend }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: frontend } }
+  template:
+    metadata: { labels: { app: frontend } }
+    spec:
+      containers:
+        - name: frontend
+          image: IMAGE_REGISTRY/bookstore-frontend:IMAGE_TAG
+          imagePullPolicy: IfNotPresent
+          ports: [{ containerPort: 80 }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: frontend }
+spec:
+  type: LoadBalancer        # on AWS EKS this creates a public load balancer URL
+  selector: { app: frontend }
+  ports: [{ port: 80, targetPort: 80 }]
+---
+# Autoscaling example: add order-service pods when CPU goes above 70%
+# (needs metrics-server: `minikube addons enable metrics-server`)
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: { name: order-service }
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: order-service }
+  minReplicas: 1
+  maxReplicas: 3
+  metrics:
+    - type: Resource
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: 70 } }
